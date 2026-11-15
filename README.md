@@ -84,6 +84,8 @@ Firebase handles account storage and profile data; the NASA Express service does
 
 The Vite development server proxies `/api` requests to the Express API at `http://127.0.0.1:3001`. Fill the `VITE_FIREBASE_*` values in `.env` from the Firebase web app config to use sign-in and profiles locally.
 
+Test the website here - [text](https://rubenv123.github.io/Space-Quest/)
+
 ## Useful commands
 
 ```bash
