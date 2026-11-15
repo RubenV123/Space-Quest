@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db, firebaseReady } from './firebase';
 import { 
   Rocket, Map, Users, Settings, Award, ChevronRight, CheckCircle2, 
   AlertTriangle, Zap, Shield, Cpu, Activity, Flag, Undo2, Star, 
@@ -9,9 +12,10 @@ import {
 } from 'lucide-react';
 
 async function apiRequest(path, options = {}) {
-  const response = await fetch(path, {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  const response = await fetch(`${apiBase}${path}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) },
   });
   if (!response.ok) {
     const result = await response.json().catch(() => ({}));
@@ -20,7 +24,7 @@ async function apiRequest(path, options = {}) {
   return response.status === 204 ? null : response.json();
 }
 
-function AuthScreen({ onAuthenticated, loading }) {
+function AuthScreen({ loading }) {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,10 +35,20 @@ function AuthScreen({ onAuthenticated, loading }) {
     setSubmitting(true);
     setError('');
     try {
-      const result = await apiRequest(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify({ email, password }) });
-      await onAuthenticated(result.user);
+      if (!firebaseReady || !auth) throw new Error('Firebase is not configured yet. Add the Firebase web app settings before signing in.');
+      const credential = mode === 'register'
+        ? await createUserWithEmailAndPassword(auth, email.trim(), password)
+        : await signInWithEmailAndPassword(auth, email.trim(), password);
+      void credential;
     } catch (requestError) {
-      setError(requestError.message === 'Failed to fetch' ? 'Can’t reach the server. Start the app with npm run dev and try again.' : requestError.message);
+      const messages = {
+        'auth/email-already-in-use': 'An account with this email already exists.',
+        'auth/invalid-credential': 'Email or password is incorrect.',
+        'auth/invalid-email': 'Enter a valid email address.',
+        'auth/weak-password': 'Use a stronger password with at least 12 characters.',
+        'auth/too-many-requests': 'Too many attempts. Wait a while and try again.',
+      };
+      setError(messages[requestError.code] || requestError.message || 'Could not sign in. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -207,33 +221,33 @@ export default function SpaceQuestApp() {
   // --- STATE ---
   const [view, setView] = useState('dashboard');
   
-  // Email/password session and SQLite-backed commander profile
+  // Firebase email/password auth and Firestore commander profile
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
-  const [profileId, setProfileId] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
 
-  // Persistent profile fallback for offline/local continuity
-  const [profile, setProfile] = useState(() => {
-    const saved = localStorage.getItem('spacequest_profile');
-    const parsed = saved ? JSON.parse(saved) : {};
-    return {
-      name: parsed.name || 'Commander',
-      level: parsed.level || 1,
-      xp: parsed.xp || 0,
-      learningXp: parsed.learningXp || 0,
-      missions: parsed.missions || 0,
-      badges: parsed.badges || [],
-    };
-  });
+  const [profile, setProfile] = useState({ name: 'Commander', level: 1, xp: 0, learningXp: 0, missions: 0, badges: [] });
 
   const loadAccount = async (accountUser) => {
-    const profiles = await apiRequest('/api/profiles');
-    const savedProfile = profiles[0] || await apiRequest('/api/profiles', {
-      method: 'POST',
-      body: JSON.stringify(profile),
-    });
-    setProfileId(savedProfile.id);
+    if (!db) throw new Error('Firebase is not configured.');
+    setProfileReady(false);
+    const profileRef = doc(db, 'users', accountUser.uid, 'profiles', 'commander');
+    const snapshot = await getDoc(profileRef);
+    let savedProfile = snapshot.exists() ? snapshot.data() : null;
+    if (!savedProfile) {
+      const localCopy = localStorage.getItem(`spacequest_profile_${accountUser.uid}`);
+      const parsed = localCopy ? JSON.parse(localCopy) : {};
+      savedProfile = {
+        name: parsed.name || 'Commander',
+        level: parsed.level || 1,
+        xp: parsed.xp || 0,
+        learningXp: parsed.learningXp || 0,
+        missions: parsed.missions || 0,
+        badges: parsed.badges || [],
+        updatedAt: new Date().toISOString(),
+      };
+      await setDoc(profileRef, savedProfile);
+    }
     setProfile({
       name: savedProfile.name,
       level: savedProfile.level,
@@ -247,33 +261,37 @@ export default function SpaceQuestApp() {
   };
 
   useEffect(() => {
-    let cancelled = false;
-    apiRequest('/api/auth/me')
-      .then(({ user: accountUser }) => loadAccount(accountUser))
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setAuthReady(true); });
-    return () => { cancelled = true; };
+    if (!firebaseReady || !auth) {
+      setAuthReady(true);
+      return undefined;
+    }
+    return onAuthStateChanged(auth, (accountUser) => {
+      if (!accountUser) {
+        setUser(null);
+        setProfileReady(false);
+        setAuthReady(true);
+        return;
+      }
+      loadAccount(accountUser)
+        .catch((error) => console.error('Could not load commander profile:', error.message))
+        .finally(() => setAuthReady(true));
+    });
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('spacequest_profile', JSON.stringify(profile));
-    if (!user || !profileId || !profileReady) return;
-    apiRequest(`/api/profiles/${profileId}`, {
-      method: 'PUT',
-      body: JSON.stringify(profile),
-    }).catch((error) => console.error('Could not sync commander profile:', error.message));
-  }, [profile, user, profileId, profileReady]);
-
-  const handleAuthenticated = async (accountUser) => {
-    await loadAccount(accountUser);
-    setAuthReady(true);
-  };
+    if (!user || !db || !profileReady) return;
+    localStorage.setItem(`spacequest_profile_${user.uid}`, JSON.stringify(profile));
+    setDoc(doc(db, 'users', user.uid, 'profiles', 'commander'), {
+      ...profile,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true }).catch((error) => console.error('Could not sync commander profile:', error.message));
+  }, [profile, user, profileReady]);
 
   const handleLogout = async () => {
-    await apiRequest('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    if (auth) await signOut(auth).catch((error) => console.error('Could not sign out:', error.message));
     setUser(null);
-    setProfileId(null);
     setProfileReady(false);
+    setProfile({ name: 'Commander', level: 1, xp: 0, learningXp: 0, missions: 0, badges: [] });
     setNasaApod(null);
     setMeteorites([]);
     setNeoSnapshot(null);
@@ -1394,7 +1412,7 @@ export default function SpaceQuestApp() {
 
   // --- MAIN RENDER ---
   if (!authReady || !user) {
-    return <AuthScreen onAuthenticated={handleAuthenticated} loading={!authReady} />;
+    return <AuthScreen loading={!authReady} />;
   }
 
   return (

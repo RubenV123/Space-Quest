@@ -36,11 +36,11 @@ Space Academy also includes real-world mission profiles. Space Lab provides inte
 ## Technology
 
 - **Frontend:** React with TSX, Tailwind CSS, and Lucide React icons
-- **Backend:** Node.js and Express
-- **Storage:** SQLite for user accounts, sessions, and commander profiles
+- **Authentication and profiles:** Firebase Authentication and Cloud Firestore
+- **NASA API:** Node.js and Express proxy deployed as a separate free Render web service
 - **External data:** NASA APOD, NASA/JPL NeoWs, and NASA Open Data Meteorite Landings, fetched by the backend
 
-The current repository uses email/password authentication with SQLite-backed profiles. User records stay in the database on the machine running the backend; NASA is the source of science data, not the account database.
+Email/password accounts are managed by Firebase Authentication. Commander profiles are stored in Firestore under each user's private account path. The Express service only proxies NASA requests so the NASA API key stays on the server.
 
 ## Requirements
 
@@ -48,7 +48,7 @@ The current repository uses email/password authentication with SQLite-backed pro
 - npm
 - A NASA API key (the NASA `DEMO_KEY` can be used for a quick local start, with lower rate limits)
 
-The backend uses Node's built-in `node:sqlite` module, so no separate database server is needed.
+Firebase handles account storage and profile data; the NASA Express service does not store user data.
 
 ## Run locally
 
@@ -82,36 +82,39 @@ The backend uses Node's built-in `node:sqlite` module, so no separate database s
 
 5. Open [http://localhost:5173](http://localhost:5173).
 
-The Vite development server proxies `/api` requests to the Express API at `http://127.0.0.1:3001`. The API creates `data/spacequest.sqlite` automatically on first start. User accounts and commander profiles stay in that local database.
+The Vite development server proxies `/api` requests to the Express API at `http://127.0.0.1:3001`. Fill the `VITE_FIREBASE_*` values in `.env` from the Firebase web app config to use sign-in and profiles locally.
 
 ## Useful commands
 
 ```bash
 npm run dev          # Start Vite and the API server
 npm run dev:client   # Start only the Vite frontend
-npm run dev:server   # Start only the Express API
+npm run dev:server   # Start only the NASA API
 npm run build        # Create the frontend production bundle
 npm run preview      # Preview the frontend production bundle
-npm start            # Start the production Express server
+npm start            # Start the NASA API server
 ```
 
-## Publish a public website
+## Free public deployment
 
-GitHub stores the source code; it does not run this full-stack app. The included `render.yaml` configures a Render web service to build the Vite frontend, serve it and the Express API from one public URL, and store SQLite data on a persistent disk. The blueprint uses a paid Render web service because Render's free web services cannot attach persistent disks; without persistent storage, account and profile data in SQLite can be lost when a service restarts or redeploys. See [Render's free service limitations](https://render.com/docs/free) and [persistent disk documentation](https://render.com/docs/disks).
+GitHub Pages serves the Vite frontend. Firebase Authentication and Firestore provide the backend for accounts and profiles; the web SDK connects directly from the browser. Render runs only the NASA API proxy, with no local account database. The included GitHub Actions workflow builds and deploys the frontend when changes are pushed to `main`; `render.yaml` configures the free NASA API service.
 
-To deploy, open the Render dashboard, choose **New → Blueprint**, connect this GitHub repository, and apply the `render.yaml` configuration. Render will prompt you for `NASA_API_KEY`; enter it as a secret environment variable. When deployment finishes, open the `onrender.com` URL shown for the service. Later pushes to the linked branch can trigger redeploys.
+### One-time setup
+
+1. Create a Firebase project and register a Web app. Enable **Authentication → Email/Password** and create a **Cloud Firestore** database.
+2. In Firebase Authentication settings, add `rubenv123.github.io` to **Authorized domains**.
+3. Publish the rules in `firestore.rules` to Firestore. They restrict each user's profile documents to that signed-in user.
+4. In the GitHub repository, open **Settings → Secrets and variables → Actions → Variables** and add `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, and `VITE_FIREBASE_APP_ID` from the Firebase web app config. These Firebase web config values identify the project; Firestore rules enforce data access.
+5. In **Settings → Pages**, set the source to **GitHub Actions**. Push a commit to `main`; the workflow publishes the site at `https://rubenv123.github.io/Space-Quest/`.
+6. In Render, create a Blueprint from this repository using `render.yaml`. Enter `NASA_API_KEY` as a secret. Once the service is live, add its `onrender.com` URL as the `VITE_API_BASE_URL` Actions variable and rerun the Pages workflow.
+
+Free Render services sleep after 15 minutes of inactivity and may take about a minute to wake. Firebase's free plan has usage limits and may pause projects after extended inactivity; see [Render's free limits](https://render.com/docs/free) and [Firebase pricing](https://firebase.google.com/pricing).
 
 ## API routes
 
 | Route | Purpose |
 | --- | --- |
 | `GET /api/health` | Check API status |
-| `POST /api/auth/register` | Create an account |
-| `POST /api/auth/login` | Sign in |
-| `POST /api/auth/logout` | Sign out |
-| `GET /api/auth/me` | Read the current session |
-| `/api/profiles` | List and create commander profiles |
-| `/api/profiles/:id` | Update or delete a commander profile |
 | `GET /api/nasa/apod` | Fetch NASA Astronomy Picture of the Day |
 | `GET /api/nasa/neo` | Fetch today's near-Earth object data |
 | `GET /api/nasa/meteorites` | Fetch the largest recorded meteorite landings |
@@ -122,14 +125,15 @@ To deploy, open the Render dashboard, choose **New → Blueprint**, connect this
 main.tsx             React entry point
 space_academy.tsx    Space Quest interface and game screens
 styles.css           Global styles and Tailwind import
-server/index.js      Express API, authentication, SQLite, and NASA services
-data/                Local SQLite database (generated; not committed)
+server/index.js      Express NASA API proxy
+firebase.ts          Firebase Authentication and Firestore client setup
+firestore.rules      Per-user Firestore profile access rules
 ```
 
 ## Notes
 
-- Never commit `.env`, API keys, account data, or the local SQLite database.
-- NASA is the source for space-science data; user accounts and profiles are stored in the local SQLite database.
+- Never commit `.env`, NASA API keys, Firebase service-account credentials, or account data. Firebase web app config values are public identifiers; access must be protected by Firestore Security Rules.
+- NASA is the source for space-science data; Firebase Authentication and Firestore store user accounts and profiles.
 - `oldspace_academy.tsx` is a local restore backup and is excluded from the repository. The active component is `space_academy.tsx`.
-- Render deployment serves the built frontend and API from the same origin and stores SQLite under `/var/data` on its persistent disk.
+- Render hosts the NASA API only. GitHub Pages serves the built frontend.
 - No license is included. Choose a license before publishing if you want to grant reuse rights.
