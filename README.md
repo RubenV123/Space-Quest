@@ -92,7 +92,14 @@ npm run dev:client   # Start only the Vite frontend
 npm run dev:server   # Start only the Express API
 npm run build        # Create the frontend production bundle
 npm run preview      # Preview the frontend production bundle
+npm start            # Start the production Express server
 ```
+
+## Publish a public website
+
+GitHub stores the source code; it does not run this full-stack app. The included `render.yaml` configures a Render web service to build the Vite frontend, serve it and the Express API from one public URL, and store SQLite data on a persistent disk. The blueprint uses a paid Render web service because Render's free web services cannot attach persistent disks; without persistent storage, account and profile data in SQLite can be lost when a service restarts or redeploys. See [Render's free service limitations](https://render.com/docs/free) and [persistent disk documentation](https://render.com/docs/disks).
+
+To deploy, open the Render dashboard, choose **New → Blueprint**, connect this GitHub repository, and apply the `render.yaml` configuration. Render will prompt you for `NASA_API_KEY`; enter it as a secret environment variable. When deployment finishes, open the `onrender.com` URL shown for the service. Later pushes to the linked branch can trigger redeploys.
 
 ## API routes
 
@@ -124,5 +131,5 @@ data/                Local SQLite database (generated; not committed)
 - Never commit `.env`, API keys, account data, or the local SQLite database.
 - NASA is the source for space-science data; user accounts and profiles are stored in the local SQLite database.
 - `oldspace_academy.tsx` is a local restore backup and is excluded from the repository. The active component is `space_academy.tsx`.
-- The Express API currently binds to localhost. Hosting the API publicly requires deployment configuration and a secure database plan.
+- Render deployment serves the built frontend and API from the same origin and stores SQLite under `/var/data` on its persistent disk.
 - No license is included. Choose a license before publishing if you want to grant reuse rights.

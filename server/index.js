@@ -3,7 +3,7 @@ import express from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -13,7 +13,8 @@ const port = Number(process.env.PORT || 3001);
 const nasaKey = process.env.NASA_API_KEY || 'DEMO_KEY';
 const cache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000;
-const dataDirectory = join(dirname(fileURLToPath(import.meta.url)), '..', 'data');
+const projectDirectory = join(dirname(fileURLToPath(import.meta.url)), '..');
+const dataDirectory = process.env.DATA_DIR || join(projectDirectory, 'data');
 mkdirSync(dataDirectory, { recursive: true });
 const database = new DatabaseSync(join(dataDirectory, 'spacequest.sqlite'));
 database.exec('PRAGMA foreign_keys = ON;');
@@ -272,6 +273,19 @@ app.delete('/api/profiles/:id', authRequired, (req, res) => {
   return res.status(204).end();
 });
 
+const builtClientDirectory = join(projectDirectory, 'dist');
+if (existsSync(builtClientDirectory)) {
+  app.use(express.static(builtClientDirectory));
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api/')) {
+      return res.sendFile(join(builtClientDirectory, 'index.html'), (error) => {
+        if (error) next(error);
+      });
+    }
+    return next();
+  });
+}
+
 app.get('/api/nasa/apod', async (_req, res) => {
   try {
     // NASA's current APOD endpoint is hosted by NASA Science. It returns a
@@ -350,6 +364,6 @@ app.get('/api/nasa/meteorites', async (_req, res) => {
   }
 });
 
-app.listen(port, '127.0.0.1', () => {
-  console.log(`Space Quest API listening at http://127.0.0.1:${port}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Space Quest server listening on port ${port}`);
 });
