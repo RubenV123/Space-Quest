@@ -1,0 +1,28 @@
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Local database and runtime files
+data/*.sqlite
+data/*.sqlite-*
+*.log
+npm-debug.log*
+
+# Local design notes and restore-only backup files
+.impeccable/
+PRODUCT.md
+/oldspace_academy.tsx
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Unused nested Git placeholder
+/Space Quest/
